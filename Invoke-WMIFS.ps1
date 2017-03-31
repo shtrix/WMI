@@ -1,5 +1,4 @@
 ﻿<#
-
 Example run of it
 1. Create the Class
 2. Get the Class String Length
@@ -247,7 +246,7 @@ Function ConvertFrom-Base64 {
             ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
             [string]$EncodedText,
         [Parameter(Mandatory=$false, HelpMessage="Name of File to Convert")]
-            [switch]$WriteToDisk
+            [switch]$WriteToDisk,
 		[Parameter(Mandatory=$false, HelpMessage="Name of File to Write Out")]
             [string]$FileName = "NothingToSeeHere.txt"
     )
