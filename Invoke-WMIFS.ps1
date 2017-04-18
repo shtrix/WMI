@@ -78,7 +78,7 @@ Function New-WMIClass {
 #>
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage="Name of Class to Create.")]
+        [Parameter(Mandatory=$false, HelpMessage="Name of Class to Create.")]
             [string]$ClassName = 'WMIFS'
     )
     Begin {
@@ -161,7 +161,7 @@ Function Invoke-InsertFile {
             [string]$ClassName = 'WMIFS',
         [Parameter(Mandatory=$false, HelpMessage="Allowed String Length")]
             [string]$StrLen = 8000,
-        [Parameter(Mandatory=$false, HelpMessage="Encrypt the input file")]
+        [Parameter(Mandatory=$false, HelpMessage="Encrypt the input file. This increase the file size by approximately 4x")]
             [switch]$Encrypt,
         [Parameter(Mandatory=$false, HelpMessage="Optional Encryption Key")]
         [ValidateLength(16,16)]
@@ -169,9 +169,14 @@ Function Invoke-InsertFile {
     )
     Begin {
         $index = 0
+        if ($Encrypt) {
+            #Rough estimate
+            $StrLen /= 4.2
+            $StrLen = [Math]::Floor($StrLen)
+        }
     } Process {
         For ($i = 0; $i -lt $EncodedText.Length; $i += $strlen) {
-            Write-Verbose "Inserting Section: $i to $($i + $strlen)" 
+            Write-Verbose "Inserting Section: $i to $($i + $strlen) ($index)" 
             if ($($i + $strlen) -le $EncodedText.Length) {
                 [string]$substring = $EncodedText.Substring($i, $strlen)
             } else {
@@ -292,17 +297,19 @@ Function ConvertFrom-Base64 {
 }
 
 ################################################################################
+#
 ################################################################################
 Function ConvertTo-EncryptedText{
+    [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage=".")]
+        [Parameter(Mandatory=$true, HelpMessage="String of Text to Encrypt.")]
             [string]$PlaintextString,
-        [Parameter(Mandatory=$false, HelpMessage="")]
+        [Parameter(Mandatory=$false, HelpMessage="Optional Encryption Key.")]
             [string]$Key
     )
     Begin {
-    } Process {
         $SecureString = ConvertTo-SecureString -String $PlaintextString -AsPlainText -Force
+    } Process {
         if ($key) {
             $EncryptedString = ConvertFrom-SecureString -SecureString $SecureString -Key $Key
         } else {
@@ -314,12 +321,14 @@ Function ConvertTo-EncryptedText{
 }
 
 ################################################################################
+#
 ################################################################################
 Function ConvertFrom-EncryptedText{
+    [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage=".")]
+        [Parameter(Mandatory=$true, HelpMessage="String of Text to Decrypt.")]
             [string]$EncryptedString,
-        [Parameter(Mandatory=$false, HelpMessage="")]
+        [Parameter(Mandatory=$false, HelpMessage="Optional Decryption Key")]
             [string]$Key
     )
     Begin {
