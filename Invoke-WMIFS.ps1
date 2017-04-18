@@ -160,7 +160,12 @@ Function Invoke-InsertFile {
         [Parameter(Mandatory=$true, HelpMessage="Name of Class to Create.")]
             [string]$ClassName = 'WMIFS',
         [Parameter(Mandatory=$false, HelpMessage="Allowed String Length")]
-            [string]$StrLen = 8000
+            [string]$StrLen = 8000,
+        [Parameter(Mandatory=$false, HelpMessage="Encrypt the input file")]
+            [switch]$Encrypt,
+        [Parameter(Mandatory=$false, HelpMessage="Optional Encryption Key")]
+        [ValidateLength(16,16)]
+            [string]$Key
     )
     Begin {
         $index = 0
@@ -171,6 +176,13 @@ Function Invoke-InsertFile {
                 [string]$substring = $EncodedText.Substring($i, $strlen)
             } else {
                 [string]$substring = $EncodedText.Substring($i, $($EncodedText.Length - $i))
+            }
+            if ($Encrypt) {
+                if ($key) {
+                    $substring = ConvertTo-EncryptedText -PlaintextString $substring -Key $Key
+                } else {
+                    $substring = ConvertTo-EncryptedText -PlaintextString $substring
+                }
             }
             Set-WmiInstance -Class $ClassName -Arguments @{
                 FileStore = $Substring;
@@ -204,7 +216,12 @@ Function Invoke-RetrieveFile {
         [Parameter(Mandatory=$true, HelpMessage="Name of File to Retrieve")]
             [string]$FileName,
         [Parameter(Mandatory=$true, HelpMessage="Name of Class to Create.")]
-            [string]$ClassName = 'WMIFS'
+            [string]$ClassName = 'WMIFS',
+        [Parameter(Mandatory=$false, HelpMessage="Decrypt the Retrieved File")]
+            [switch]$Decrypt,
+        [Parameter(Mandatory=$false, HelpMessage="Optional Decryption Key")]
+        [ValidateLength(16,16)]
+            [string]$Key
     )
     Begin {
     } Process {
@@ -213,7 +230,15 @@ Function Invoke-RetrieveFile {
         For($j = 0; $j -lt $query.Count; $j++) {
             [String]$FileStore = $($query | ? Index -EQ $j).FileStore
             Write-Verbose "Reading Section $j ($($FileStore.Length))"
-            $FilePart += $FileStore
+            if ($Decrypt) {
+                if ($key) {
+                    $FilePart += $(ConvertFrom-EncryptedText -EncryptedString $FileStore -Key $Key)
+                } else {
+                    $FilePart += $(ConvertFrom-EncryptedText -EncryptedString $FileStore)
+                }
+            } else {
+                $FilePart += $FileStore
+            }
         }
     } End {
         Write-Output $FilePart
@@ -263,5 +288,50 @@ Function ConvertFrom-Base64 {
 		} else {
 			Write-Output $Output
 		}
+    }
+}
+
+################################################################################
+################################################################################
+Function ConvertTo-EncryptedText{
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage=".")]
+            [string]$PlaintextString,
+        [Parameter(Mandatory=$false, HelpMessage="")]
+            [string]$Key
+    )
+    Begin {
+    } Process {
+        $SecureString = ConvertTo-SecureString -String $PlaintextString -AsPlainText -Force
+        if ($key) {
+            $EncryptedString = ConvertFrom-SecureString -SecureString $SecureString -Key $Key
+        } else {
+            $EncryptedString = ConvertFrom-SecureString -SecureString $SecureString
+        }
+    } End {
+        $EncryptedString
+    }
+}
+
+################################################################################
+################################################################################
+Function ConvertFrom-EncryptedText{
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage=".")]
+            [string]$EncryptedString,
+        [Parameter(Mandatory=$false, HelpMessage="")]
+            [string]$Key
+    )
+    Begin {
+
+    } Process {
+        if ($key) {
+            $SecureString = ConvertTo-SecureString -String $EncryptedString -Key $Key
+        } else {
+            $SecureString = ConvertTo-SecureString -String $EncryptedString
+        }
+        $PlaintextString = (New-Object System.Net.NetworkCredential([string]::Empty, $SecureString)).password
+    } End {
+        $PlaintextString
     }
 }
