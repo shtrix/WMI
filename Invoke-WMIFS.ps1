@@ -104,6 +104,7 @@ Function New-WMIClass {
 
 ################################################################################
 # Convert the input file to Base64
+# https://github.com/samratashok/nishang/blob/master/Utility/ExetoText.ps1
 ################################################################################
 Function ConvertTo-Base64 {
 <#
@@ -252,6 +253,7 @@ Function Invoke-RetrieveFile {
 
 ################################################################################
 # Covert the file back from Base64 to bytes
+# https://github.com/samratashok/nishang/blob/master/Utility/TexttoExe.ps1
 ################################################################################
 Function ConvertFrom-Base64 {
 <#
