@@ -126,7 +126,7 @@ Function ConvertTo-Base64 {
         [byte[]]$File = Get-Content -Encoding Byte -Path $FileName
         Write-Verbose "Encoding $FileName"
         $Bytes = [System.Text.Encoding]::Unicode.GetBytes($File)
-        $EncodedText =[Convert]::ToBase64String($Bytes)
+        $EncodedText = [Convert]::ToBase64String($Bytes)
         Write-Verbose "Finished Encoding $FileName"
     } End {
         Write-Output $EncodedText
@@ -299,7 +299,7 @@ Function ConvertFrom-Base64 {
 }
 
 ################################################################################
-#
+# Encrypt the string before inserting
 ################################################################################
 Function ConvertTo-EncryptedText{
     [CmdletBinding()]
@@ -323,7 +323,7 @@ Function ConvertTo-EncryptedText{
 }
 
 ################################################################################
-#
+# Decrypt the string after retrieval
 ################################################################################
 Function ConvertFrom-EncryptedText{
     [CmdletBinding()]
