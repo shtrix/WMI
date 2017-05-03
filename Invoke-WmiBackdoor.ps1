@@ -6,22 +6,35 @@ $__PARAMETERS = New-Object System.Management.ManagementClass("ROOT", "__PARAMETE
 ################################################################################
 ################################################################################
 $InParameters = $__PARAMETERS.Clone()
-$InParameters.Qualifiers.Add("In", $true)
+$InParameters.Qualifiers.Add("In", $false)
 
 $InParameters.Properties.Add("CommandLine", [System.Management.CimType]::String, $false)
-$InParameters.Properties["CommandLine"].Qualifiers.Add("In", $true)
-$InParameters.Properties["CommandLine"].Qualifiers.Add("ID", 0)
-$InParameters.Properties["CommandLine"].Qualifiers.Add("MappingStrings", "Win32API|Process and Thread Functions|lpCommandLine")
+$InParameters.Properties["CommandLine"].Qualifiers.Add("In", $false)
+$InParameters.Properties["CommandLine"].Qualifiers.Add("ID", 0, $false, $true, $false, $false)
+$InParameters.Properties["CommandLine"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|lpCommandLine ")
 
 $InParameters.Properties.Add("CurrentDirectory", [System.Management.CimType]::String, $false)
-$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("In", $true)
-$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("ID", 1)
-$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("MappingStrings", "Win32API|Process and Thread Functions|CreateProcess|lpCurrentDirectory")
+$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("In", $false)
+$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("ID", 1, $false, $true, $false, $false)
+$InParameters.Properties["CurrentDirectory"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess|lpCurrentDirectory ")
 
-$InParameters.Properties.Add("ProcessStartupInformation", [System.Management.CimType]::Object, $false)
+$ProcessStartup = New-Object System.Management.ManagementClass("ROOT\CIMv2", "Win32_ProcessStartup", $null)
+$TempPtr = [System.IntPtr]$ProcessStartup
+$DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
+$SystemManagement = [System.Reflection.Assembly]::LoadFile($DotNetPath+"System.Management.dll")
+$IWbemClassObjectFreeThreaded = $SystemManagement.GetType(‘System.Management.IWbemClassObjectFreeThreaded’)
+$IWbemClassObjectFreeThreaded_ctor = $IWbemClassObjectFreeThreaded.GetConstructors()[0]
+$IWbemClassObjectFreeThreadedInstance = $IWbemClassObjectFreeThreaded_ctor.Invoke($TempPtr)
+$ManagementBaseObject = $SystemManagement.GetType(‘System.Management.ManagementBaseObject’)
+$ManagementBaseObject_ctor = $ManagementBaseObject.GetConstructors([Reflection.BindingFlags] "NonPublic, Instance")[1]
+$ProcessStartupManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($IWbemClassObjectFreeThreadedInstance)
+
+$InParameters.Properties.Add("ProcessStartupInformation", $ProcessStartupManagementBaseObjectInstance, [Microsoft.Management.Infrastructure.CimType]::Instance)
 $InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("In", $true)
-$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("ID", 2)
-$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("MappingStrings", "WMI|Win32_ProcessStartup")
+$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("ID", 2, $false, $true, $false, $false)
+$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("MappingStrings", [String[]]"WMI|Win32_ProcessStartup")
+$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("EmbeddedInstance", "Win32_ProcessStartup")
+$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("EmbeddedObject", $false)
 
 $TempPtr = [System.IntPtr]$InParameters
 $DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
@@ -36,14 +49,13 @@ $InParametersManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($I
 ################################################################################
 ################################################################################
 $OutParameters =$__PARAMETERS.Clone()
-$OutParameters.Qualifiers.Add("Out", $true)
-#$OutParameters.Properties.Add("ProcessId", [System.Management.CimType]::UInt32, $false)
-#$OutParameters.Properties["ProcessId"].Qualifiers.Add("Out", $true)
-#$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("ID", 0)
-#$OutParameters.Properties["ProcessId"].Qualifiers.Add("MappingStrings", "Win32API|Process and Thread Functions|CreateProcess|lpProcessInformation|dwProcessId")
+$OutParameters.Qualifiers.Add("Out", $false)
+$OutParameters.Properties.Add("ProcessId", [System.Management.CimType]::UInt32, $false)
+$OutParameters.Properties["ProcessId"].Qualifiers.Add("Out", $false)
+$OutParameters.Properties["ProcessId"].Qualifiers.Add("ID", 3, $false, $true, $false, $false)
+$OutParameters.Properties["ProcessId"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess|lpProcessInformation|dwProcessId")
 
 $OutParameters.Properties.Add("ReturnValue", [System.Management.CimType]::UInt32, $false)
-#$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("ID", 0)
 $OutParameters.Properties["ReturnValue"].Qualifiers.Add("Out", $true)
 
 $TempPtr = [System.IntPtr]$OutParameters
@@ -59,31 +71,22 @@ $OutParametersManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($
 ################################################################################
 ################################################################################
 #$Name = "CreateProcessWithLogonW"
-#$Origin = "Win32_ProcessLogon"
-$ClassName = "Win32_ProcessLogon"
 
-$Class = New-Object System.Management.ManagementClass("root\cimv2", [String]::Empty, $null); 
-$Class["__CLASS"] = $ClassName;
-
+$CIMProcess = New-Object System.Management.ManagementClass("ROOT\CIMv2", "CIM_Process", $null)
+$Class = $CIMProcess.Derive("Win32_ProcessLogon")
 $Name = "CreateLogon"
 
 $Class.Methods.Add($Name, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
-#Add(string methodName, ManagementBaseObject inParameters, ManagementBaseObject outParameters)
-
 $Class.Methods["$Name"].Qualifiers.Add("Constructor", $true)
-$Class.Methods["$Name"].Qualifiers.Add("Implemented", $true)
-$Class.Methods["$Name"].Qualifiers.Add("MappingStrings", "Win32API|Process and Thread Functions|CreateProcess")
-$Class.Methods["$Name"].Qualifiers.Add("Privileges", @("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"))
 $Class.Methods["$Name"].Qualifiers.Add("Static", $true)
-$Class.Methods["$Name"].Qualifiers.Add("ValueMap", @("0", "2", "3", "8", "9", "21", ".."))
+$Class.Methods["$Name"].Qualifiers.Add("Implemented", $true)
+$Class.Methods["$Name"].Qualifiers.Add("Privileges", [String[]]@("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"))
+$Class.Methods["$Name"].Qualifiers.Add("ValueMap", [String[]]@("0", "2", "3", "8", "9", "21", ".."))
+$Class.Methods["$Name"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess")
 
-#InParameters -> IWbemClassObjectFreeThreaded -> ManagementBaseObject1
-#OutParameters -> IWbemClassObjectFreeThreaded -> ManagementBaseObject2
-# Create, ManagementBaseObject1, ManagementBaseObject2
+$Class.Put()
 
-
-
-
+<#
 ################################################################################
 ################################################################################
 $QualifierData = $SystemManagement.GetType(‘System.Management.QualifierData’)
@@ -113,3 +116,4 @@ Function local:Get-ManagementBaseObject {
     #This is the in and out param in MethodDataCollection
     Return $ManagementBaseObjectInstance
 }
+#>
