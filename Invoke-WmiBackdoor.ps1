@@ -18,23 +18,12 @@ $InParameters.Properties["CurrentDirectory"].Qualifiers.Add("In", $false)
 $InParameters.Properties["CurrentDirectory"].Qualifiers.Add("ID", 1, $false, $true, $false, $false)
 $InParameters.Properties["CurrentDirectory"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess|lpCurrentDirectory ")
 
-$ProcessStartup = New-Object System.Management.ManagementClass("ROOT\CIMv2", "Win32_ProcessStartup", $null)
-$TempPtr = [System.IntPtr]$ProcessStartup
-$DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
-$SystemManagement = [System.Reflection.Assembly]::LoadFile($DotNetPath+"System.Management.dll")
-$IWbemClassObjectFreeThreaded = $SystemManagement.GetType(‘System.Management.IWbemClassObjectFreeThreaded’)
-$IWbemClassObjectFreeThreaded_ctor = $IWbemClassObjectFreeThreaded.GetConstructors()[0]
-$IWbemClassObjectFreeThreadedInstance = $IWbemClassObjectFreeThreaded_ctor.Invoke($TempPtr)
-$ManagementBaseObject = $SystemManagement.GetType(‘System.Management.ManagementBaseObject’)
-$ManagementBaseObject_ctor = $ManagementBaseObject.GetConstructors([Reflection.BindingFlags] "NonPublic, Instance")[1]
-$ProcessStartupManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($IWbemClassObjectFreeThreadedInstance)
-
-$InParameters.Properties.Add("ProcessStartupInformation", $ProcessStartupManagementBaseObjectInstance, [Microsoft.Management.Infrastructure.CimType]::Instance)
+$InParameters.Properties.Add("ProcessStartupInformation", [System.Management.CimType]::Object, $false)
+$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("CIMTYPE", "object:Win32_ProcessStartup")
 $InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("In", $true)
 $InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("ID", 2, $false, $true, $false, $false)
 $InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("MappingStrings", [String[]]"WMI|Win32_ProcessStartup")
 $InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("EmbeddedInstance", "Win32_ProcessStartup")
-$InParameters.Properties["ProcessStartupInformation"].Qualifiers.Add("EmbeddedObject", $false)
 
 $TempPtr = [System.IntPtr]$InParameters
 $DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
@@ -50,6 +39,7 @@ $InParametersManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($I
 ################################################################################
 $OutParameters =$__PARAMETERS.Clone()
 $OutParameters.Qualifiers.Add("Out", $false)
+
 $OutParameters.Properties.Add("ProcessId", [System.Management.CimType]::UInt32, $false)
 $OutParameters.Properties["ProcessId"].Qualifiers.Add("Out", $false)
 $OutParameters.Properties["ProcessId"].Qualifiers.Add("ID", 3, $false, $true, $false, $false)
@@ -71,20 +61,38 @@ $OutParametersManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($
 ################################################################################
 ################################################################################
 #$Name = "CreateProcessWithLogonW"
+$Name = "Create"
 
 $CIMProcess = New-Object System.Management.ManagementClass("ROOT\CIMv2", "CIM_Process", $null)
 $Class = $CIMProcess.Derive("Win32_ProcessLogon")
-$Name = "CreateLogon"
+
+$Class.Qualifiers.Add("dynamic", $true)
+$Class.Qualifiers.Add("provider", "CIMWin32", $false, $true, $false, $true)
+$Class.Qualifiers.Add("SupportsCreate", $true)
+$Class.Qualifiers.Add("CreateBy", "Create")
+$Class.Qualifiers.Add("SupportsDelete", $true)
+$Class.Qualifiers.Add("DeleteBy", "DeleteInstance")
+$Class.Qualifiers.Add("Locale", 1033, $false, $true, $false, $true)
+$Class.Qualifiers.Add("UUID", "{8503C4DC-5FBB-11D2-AAC1-006008C78BC7}", $false, $true, $false, $true)
 
 $Class.Methods.Add($Name, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
 $Class.Methods["$Name"].Qualifiers.Add("Constructor", $true)
 $Class.Methods["$Name"].Qualifiers.Add("Static", $true)
 $Class.Methods["$Name"].Qualifiers.Add("Implemented", $true)
-$Class.Methods["$Name"].Qualifiers.Add("Privileges", [String[]]@("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"))
-$Class.Methods["$Name"].Qualifiers.Add("ValueMap", [String[]]@("0", "2", "3", "8", "9", "21", ".."))
-$Class.Methods["$Name"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess")
+$Class.Methods["$Name"].Qualifiers.Add("Privileges", [String[]]@("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"), $false, $false, $true, $true)
+$Class.Methods["$Name"].Qualifiers.Add("ValueMap", [String[]]@("0", "2", "3", "8", "9", "21", ".."), $false, $false, $true, $true)
+$Class.Methods["$Name"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Functions|CreateProcess", $false, $false, $true, $true)
+
+$Class.Properties.Add("ProcessId", [System.Management.CimType]::UInt32, $false)
+$Class.Properties["ProcessId"].Qualifiers.Add("read", $true, $false, $false, $true, $true)
+$Class.Properties["ProcessId"].Qualifiers.Add("MappingStrings", [String[]]"Win32API|Process and Thread Structures|PROCESS_INFORMATION|dwProcessId ", $false, $false, $true, $true)
+
+$Class.Properties.Add("CommandLine", [System.Management.CimType]::String, $false)
+$Class.Properties["ProcessId"].Qualifiers.Add("read", $true)
 
 $Class.Put()
+
+(((Get-CimClass Win32_ProcessLogon).CimClassMethods | ? Name -Like CreateLogon).Parameters | ? Name -Like ProcessStartupInformation).CimType
 
 <#
 ################################################################################
