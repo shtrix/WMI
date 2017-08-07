@@ -74,6 +74,7 @@ $Class.Qualifiers.Add("SupportsDelete", $true)
 $Class.Qualifiers.Add("DeleteBy", "DeleteInstance")
 $Class.Qualifiers.Add("Locale", 1033, $false, $true, $false, $true)
 $Class.Qualifiers.Add("UUID", "{8503C4DC-5FBB-11D2-AAC1-006008C78BC7}", $false, $true, $false, $true)
+
 $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
 $Class.Methods["$MethodName"].Qualifiers.Add("Constructor", $true)
 $Class.Methods["$MethodName"].Qualifiers.Add("Static", $true)

