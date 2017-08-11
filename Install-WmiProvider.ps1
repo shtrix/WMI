@@ -23,7 +23,9 @@ Function Invoke-WMIUpload {
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$Target = ".",
         [Parameter(Mandatory=$true, HelpMessage="File to upload.")]
-            [string]$Payload,
+            [string]$PayloadPath,
+        [Parameter(Mandatory=$false, HelpMessage="Label for file in WMI.")]
+            [string]$PayloadName = $PayloadPath,
         [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
             [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$false, HelpMessage="Credential object to pass.")]
@@ -32,9 +34,9 @@ Function Invoke-WMIUpload {
     Begin {
     } Process {
         Remove-WmiObject -Class $ClassName -Credential $Credential -ComputerName $Target -Verbose
-        New-WMIClass -ClassName $ClassName -Target $Target -Username $Credential.UserName -SecurePassword $Credential.Password -Verbose
-        $EncodedText = ConvertTo-Base64 -FileName $Payload -Verbose
-        Invoke-InsertFile -Target $Target -EncodedText $EncodedText -FileName $Payload -ClassName $ClassName -StrLen 8000 -Verbose -Credential $Credential   
+        $null = New-WMIClass -ClassName $ClassName -Target $Target -Username $Credential.UserName -SecurePassword $Credential.Password -Verbose
+        $EncodedText = ConvertTo-Base64 -FileName $PayloadPath -Verbose
+        Invoke-InsertFileThreaded -Target $Target -EncodedText $EncodedText -FileName $PayloadName -ClassName $ClassName -StrLen 8000 -Verbose -Credential $Credential   
     } End { 
     }
 }
@@ -62,7 +64,7 @@ Function Invoke-WMIRemoteExtract {
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$Target = ".",
         [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
-            [string]$Payload,
+            [string]$PayloadName,
         [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
             [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$true, HelpMessage="Location on remote file system to place extracted file.")]
@@ -71,10 +73,10 @@ Function Invoke-WMIRemoteExtract {
             [object]$Credential
     )
     Begin {
-        $InvokeRetrieveFile = (Get-Command Invoke-RetrieveFile).Definition
-        $ConvertFromBase64 = (Get-Command ConvertFrom-Base64).Definition
-        $Command1 = "`$File = Invoke-RetrieveFile -FileName $Payload -ClassName $ClassName -Verbose"
-        $Command2 = "ConvertFrom-Base64 -EncodedText `$File -FileName $Destination\$Payload -Verbose"
+        $InvokeRetrieveFile = "Function Invoke-RetrieveFile {" + (Get-Command Invoke-RetrieveFile).Definition + "}"
+        $ConvertFromBase64 = "Function ConvertFrom-Base64 {" + (Get-Command ConvertFrom-Base64).Definition + "}"
+        $Command1 = "`$File = Invoke-RetrieveFile -FileName $PayloadName -ClassName $ClassName -Verbose"
+        $Command2 = "ConvertFrom-Base64 -WriteToDisk -EncodedText `$File -FileName $Destination\$PayloadName -Verbose"
         $RemoteCommand = "powershell.exe -NoP -NonI -Command '$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;'"
     } Process {
         Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
@@ -496,7 +498,7 @@ Function Invoke-InsertFileThreaded {
 
 ################################################################################
 # Pull the file back from WMI
-# Ugly Hack to get it working
+# (Less) Ugly Hack to get it working
 # an ORDER BY would nice
 ################################################################################
 Function Invoke-RetrieveFile {
@@ -512,6 +514,10 @@ Function Invoke-RetrieveFile {
 #>
     [CmdletBinding()]
     Param(
+        [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$false, HelpMessage="Credential object to pass.")]
+            [object]$Credential,
         [Parameter(Mandatory=$true, HelpMessage="Name of File to Retrieve")]
             [string]$FileName,
         [Parameter(Mandatory=$false, HelpMessage="Name of Class to Create.")]
@@ -524,7 +530,7 @@ Function Invoke-RetrieveFile {
     )
     Begin {
     } Process {
-        $query = Get-WmiObject -Query "SELECT * FROM $ClassName WHERE FileName LIKE '$FileName'"
+        $query = Get-WmiObject -Query "SELECT * FROM $ClassName WHERE FileName LIKE '$FileName'" -ComputerName $Target -Credential $Credential
         $stringBuilder = New-Object System.Text.StringBuilder
         $query | Select-Object @{Name='Index'; Expression={[int]$_.Index}},FileStore | Sort-Object Index | 
         ForEach-Object { 
@@ -790,7 +796,7 @@ function Invoke-Parallel {
         else {
             $script:MaxQueue = $MaxQueue
         }
-        Write-Verbose "Throttle: '$throttle' SleepTimer '$sleepTimer' runSpaceTimeout '$runspaceTimeout' maxQueue '$maxQueue' logFile '$logFile'"
+        #Write-Verbose "Throttle: '$throttle' SleepTimer '$sleepTimer' runSpaceTimeout '$runspaceTimeout' maxQueue '$maxQueue' logFile '$logFile'"
 
         #If they want to import variables or modules, create a clean runspace, get loaded items, use those to exclude items
         if ($ImportVariables -or $ImportModules -or $ImportFunctions) {
@@ -818,14 +824,14 @@ function Invoke-Parallel {
                 #Exclude common parameters, bound parameters, and automatic variables
                 Function _temp {[cmdletbinding(SupportsShouldProcess=$True)] param() }
                 $VariablesToExclude = @( (Get-Command _temp | Select-Object -ExpandProperty parameters).Keys + $PSBoundParameters.Keys + $StandardUserEnv.Variables )
-                Write-Verbose "Excluding variables $( ($VariablesToExclude | Sort-Object ) -join ", ")"
+                #Write-Verbose "Excluding variables $( ($VariablesToExclude | Sort-Object ) -join ", ")"
 
                 # we don't use 'Get-Variable -Exclude', because it uses regexps.
                 # One of the veriables that we pass is '$?'.
                 # There could be other variables with such problems.
                 # Scope 2 required if we move to a real module
                 $UserVariables = @( Get-Variable | Where-Object { -not ($VariablesToExclude -contains $_.Name) } )
-                Write-Verbose "Found variables to import: $( ($UserVariables | Select-Object -expandproperty Name | Sort-Object ) -join ", " | Out-String).`n"
+                #Write-Verbose "Found variables to import: $( ($UserVariables | Select-Object -expandproperty Name | Sort-Object ) -join ", " | Out-String).`n"
             }
             if ($ImportModules) {
                 $UserModules = @( Get-Module | Where-Object {$StandardUserEnv.Modules -notcontains $_.Name -and (Test-Path $_.Path -ErrorAction SilentlyContinue)} | Select-Object -ExpandProperty Path )
